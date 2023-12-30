@@ -1,11 +1,12 @@
 import numpy as np
 import copy
+import os
 from optimizer_and_loss_function import Adam_optimizer
 
 class Linear:
     def __init__(self, in_size, out_size, load = False): 
-        self.weights = np.random.normal(0, 0.1, size=(in_size, out_size))
-        self.biases =  np.random.normal(0, 0.1, size=(out_size))
+        self.weights = np.random.normal(0, np.sqrt(2/(in_size+out_size)), size=(in_size, out_size))
+        self.biases =  np.zeros((out_size))
         self.weights_optimizer = Adam_optimizer(LR=0.01, B_1=0.9 , B_2=0.999, weight_decay=0.001)
         self.biases_optimizer = Adam_optimizer(LR=0.01, B_1=0.9 , B_2=0.999, weight_decay=0.001)
         
@@ -46,6 +47,22 @@ class Linear:
     def Optimizer(self, optimizer):
         self.weights_optimizer = copy.deepcopy(optimizer)
         self.biases_optimizer = copy.deepcopy(optimizer)
+    
+    def Save_layer(self, model_name, layer_id):
+        weights = {
+                    'weights': self.weights,
+                    'biases': self.biases,
+                  }
+        layer_id = f'layer_{layer_id}.npz'
+        path = os.path.join(model_name, layer_id)
+        np.savez(path, **weights)
+    
+    def Load_layer(self, model_name, layer_id):
+        layer_id = f'layer_{layer_id}.npz'
+        path = os.path.join(model_name, layer_id)
+        saved = np.load(path)
+        self.weights = saved['weights']
+        self.biases = saved['biases']
         
         
 
@@ -136,7 +153,7 @@ class MAXpool:
         
     
     
-class Conv2d:
+class Conv2d_max_Cin:
     def __init__(self, input_shape, out_channels, kernel=(3,3), strides=(1,1), load=False):
         # https://towardsdatascience.com/backpropagation-in-fully-convolutional-networks-fcns-1a13b75fb56a
         # some asserts for if the kernels don't fit on the img size
@@ -150,7 +167,7 @@ class Conv2d:
         self.steps_H = (self.img_H+(strides[0]-kernel[0])) // strides[0]
         self.steps_W = (self.img_W+(strides[1]-kernel[1])) // strides[1]
         
-        self.weights = np.random.normal(0, 0.1, size=(out_channels, kernel[0], kernel[1]))
+        self.weights = np.random.normal(0, np.sqrt(1/(kernel[0]*kernel[1])), size=(out_channels, kernel[0], kernel[1]))
         self.weights_optmizer = Adam_optimizer(LR=0.01, B_1=0.9 , B_2=0.999, weight_decay=0.001)
         #np.random.normal(0, 0.01, size =(out_channels, kernel[0], kernel[1]))
         self.pool= pool(input_shape, kernel, strides)
@@ -185,7 +202,7 @@ class Conv2d:
         return out
                
     def backward(self, errors):
-        assert self.train == True, f"train was fals in forward pass"
+        assert self.train == True, f"train was false in forward pass"
         ######### Update weights
         #error shape should be (C_out, H, W)
         #weights in shape (C_out, H_k, W.k)
@@ -227,6 +244,114 @@ class Conv2d:
     def Optmizer(self, optimizer):
         self.weights_optmizer = copy.deepcopy(optimizer)
         
+    def Save_layer(self, model_name, layer_id):
+        weights = {
+                    'weights': self.weights,
+                  }
+        layer_id = f'layer_{layer_id}.npz'
+        path = os.path.join(model_name, layer_id)
+        np.savez(path, **weights)
+    
+    def Load_layer(self, model_name, layer_id):
+        layer_id = f'layer_{layer_id}.npz'
+        path = os.path.join(model_name, layer_id)
+        saved = np.load(path)
+        self.weights = saved['weights']
+        
+
+  
+class Conv2d:
+    def __init__(self, input_shape, out_channels, kernel=(3,3), strides=(1,1), load=False):
+        # https://towardsdatascience.com/backpropagation-in-fully-convolutional-networks-fcns-1a13b75fb56a
+        # some asserts for if the kernels don't fit on the img size
+        assert len(input_shape) == 3, f'img should be in shape (channels, H, W)'
+        assert (input_shape[1]+(strides[0]-kernel[0])) % strides[0] == 0,f'kernel and stride do not match this image shape'
+        assert (input_shape[2]+(strides[1]-kernel[1])) % strides[1] == 0,f'kernel and stride do not match this image shape'
+        
+        self.in_channels, self.out_channels = input_shape[0], out_channels
+        self.img_H,self.img_W = input_shape[1], input_shape[2]
+        self.kernel_H, self.kernel_W = kernel[0],kernel[1]
+        self.steps_H = (self.img_H+(strides[0]-kernel[0])) // strides[0]
+        self.steps_W = (self.img_W+(strides[1]-kernel[1])) // strides[1]
+        
+        self.weights = np.random.normal(0, np.sqrt(1/(kernel[0]*kernel[1]*self.in_channels)), size=(out_channels, self.in_channels, kernel[0], kernel[1]))
+        self.weights_optmizer = Adam_optimizer(LR=0.01, B_1=0.9 , B_2=0.999, weight_decay=0.001)
+        #np.random.normal(0, 0.01, size =(out_channels, kernel[0], kernel[1]))
+        self.pool= pool(input_shape, kernel, strides)
+        
+        self.train = True
+        self.pooled_input = None
+        
+        if load == True:
+            #load saved weights
+            pass
+    
+    def forward(self, input):
+        assert len(input.shape) == 3, f'input should be in shape (channels, H, W)'
+        #Input in shape (C_in, H, W)
+        pooled_input = self.pool.forward(input).transpose((1,0,2,3))
+        if self.train:
+            self.pooled_input = pooled_input
+        #pooled should be in shape (n, C_in, H.k, W.k)
+        #self.weight in shape (C_out, C_in, H.k, W.k)
+        out = pooled_input * np.expand_dims(self.weights, axis=(-4))
+        # shape (C_out, n, C_in, H.k, W.k)
+        # sum over last two axis
+        out = out.sum(axis=-1).sum(axis=-1).sum(axis=-1) 
+        # shape ((C_out, n))
+        # now we have shape (C_out, n)
+        out = out.reshape((self.out_channels, self.steps_H, self.steps_W))
+        return out
+               
+    def backward(self, errors):
+        assert self.train == True, f"train was false in forward pass"
+        ######### Update weights
+        #error shape should be (C_out, H, W)
+        #weights in shape (C_out, C_in, H_k, W.k)
+        #errors to shape (C_out, H*W, C_in, H_k, W_k)
+        errors = np.tile(errors.reshape(self.out_channels, self.steps_H*self.steps_W, 1, 1, 1), (1, 1, self.in_channels, self.kernel_H, self.kernel_W))
+        #pooled_imput is in shape (n, C_in, H.k, W.k) and should go to shape (C_out, n, C_in, H.k, W.k)
+        input_values = np.repeat(np.expand_dims(self.pooled_input, 0), self.out_channels, axis=0)        
+        #Sum to shape(C_out, C_in, H,K, W,k) this is the error for each weight
+        error_w = (errors * input_values).sum(axis=-4)
+        
+        ######### Next error
+        #error is in shape (C_out, H*W, C_in, H_k, W_k) and weights in shape (C_out, C_in, H_k, W_k)
+        next_errors  = errors * np.expand_dims(self.weights, axis=-4)
+        # we need to go to (C_in, n, H_k, W_k)
+        next_errors = next_errors.transpose(2,1,0,3,4).sum(axis=-3)
+        # now this is in shape (C_in, n, H_k, W_k)
+        next_errors = self.pool.backward(next_errors)
+        # update weights
+        self.weights = self.weights_optmizer.apply(self.weights, error_w)
+        #self.weights - error_w * LR
+        return next_errors
+    
+    def Train(self):
+        self.train = True
+    
+    def Eval(self):
+        self.train = False
+        self.pooled_input = None
+        
+    def Optmizer(self, optimizer):
+        self.weights_optmizer = copy.deepcopy(optimizer)
+        
+    def Save_layer(self, model_name, layer_id):
+        weights = {
+                    'weights': self.weights,
+                  }
+        layer_id = f'layer_{layer_id}.npz'
+        path = os.path.join(model_name, layer_id)
+        np.savez(path, **weights)
+    
+    def Load_layer(self, model_name, layer_id):
+        layer_id = f'layer_{layer_id}.npz'
+        path = os.path.join(model_name, layer_id)
+        saved = np.load(path)
+        self.weights = saved['weights']
+
+
         
         
 class ReLu:
@@ -305,8 +430,8 @@ class Batch_norm:
         self.MUs = None
         self.SIGMAs = None
         
-        self.weights = np.random.normal(0, 0.1, size=(in_shape[1], in_shape[2], in_shape[3]))
-        self.biases =  np.random.normal(0, 0.1, size=(in_shape[1], in_shape[2], in_shape[3]))
+        self.weights = np.ones((in_shape[1], in_shape[2], in_shape[3]))
+        self.biases =  np.zeros((in_shape[1], in_shape[2], in_shape[3]))
         self.weights_optimizer = Adam_optimizer(LR=0.01, B_1=0.9 , B_2=0.999, weight_decay=0.001)
         self.biases_optimizer = Adam_optimizer(LR=0.01, B_1=0.9 , B_2=0.999, weight_decay=0.001)
         self.input = None
@@ -360,6 +485,28 @@ class Batch_norm:
     def Optmizer(self, optimizer):
         self.weights_optmizer = copy.deepcopy(optimizer)
         self.biases_optimizer = copy.deepcopy(optimizer)
+    
+    def Save_layer(self, model_name, layer_id):
+        weights = {
+                    'weights': self.weights,
+                    'biases' : self.biases,
+                    'MUs' : self.MUs,
+                    'SIGMAs' : self.SIGMAs
+                  }
+        layer_id = f'layer_{layer_id}.npz'
+        path = os.path.join(model_name, layer_id)
+        np.savez(path, **weights)
+    
+    def Load_layer(self, model_name, layer_id):
+        layer_id = f'layer_{layer_id}.npz'
+        path = os.path.join(model_name, layer_id)
+        saved = np.load(path)
+        self.weights = saved['weights']
+        self.biases = saved['biases']
+        self.MU = saved['MUs']
+        self.SIGMAs = saved['SIGMAs']
+        
+        
     
 
 

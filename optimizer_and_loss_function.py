@@ -15,7 +15,7 @@ class Adam_optimizer:
             grad = grad.mean(axis=0)
         assert grad.shape== weights.shape, f'the shape of the gradients do not match the shape of the weights' 
         #assert self.Mt_prev == 0 or self.Mt_prev.shape == grad.shape, f'Something is wrong'
-        
+
         # weight decay 
         grad = grad + self.weight_decay*weights 
         
