@@ -1,2 +1,2 @@
 # MNIST-in-numpy
-image recognition algorithm for MNIST in numpy
+Image recognition algorithm in numpy for MNIST 
